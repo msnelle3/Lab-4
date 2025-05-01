@@ -1,0 +1,126 @@
+---
+title: "Lab4"
+author: "Max Snellenberger"
+date: "2025-04-17"
+output: html_document
+---
+
+```{r setup}
+library(sf)
+library(terra)
+library(tmap)
+library(spData)
+library(tidyverse)
+```
+
+```{r}
+local <- read_sf("./static_mapping/oh_counties.gpkg") %>%
+  dplyr::filter(NAME %in% c("Portage", "Summit"))
+
+state <- read_sf("./static_mapping/oh_counties.gpkg")
+
+table <-  read.csv("./static_mapping/oh_counties_DP2020.csv")
+
+glimpse(state)
+glimpse(table)
+
+#bounding box for portage and summit counties
+oh_region = st_bbox(local) %>%
+  st_as_sfc()
+
+#raster
+myras <- rast("./static_mapping/neoh_dem.tif") %>% 
+  terra::project(., "EPSG:4269") %>%
+  terra::crop(local)
+
+#remove last 6 digits from the name column
+table$name = substr(table$name, 1, nchar(table$name)-6)
+
+#join the spatial and tabular dataframes
+state <- left_join(state, table, by = c("NAMELSAD" = "name"))
+```
+
+
+```{r ohio}
+glimpse(state)
+
+
+oh_map = tm_shape(state) + 
+  tm_polygons("medianage.x", border.col = "gray") + 
+  tm_shape(oh_region) + tm_borders(lwd = 3, col = "white") +
+  tm_layout(bg.color = "lightblue") +
+  tm_scalebar(position = c("left", "top"))
+
+oh_map + 
+```
+
+
+```{r local}
+labels <- read_sf("./static_mapping/oh_places.gpkg")
+parks <-  read_sf("./static_mapping/oh_parks.gpkg")
+rivers <- read_sf("./static_mapping/oh_rivers.gpkg")
+
+local.map <- tm_shape(state, bbox = oh_region) + 
+  tm_borders() +
+  tm_shape(labels) + 
+  tm_fill(fill_alpha = 0.5) + 
+  tm_labels("NAME", size = 0.5) +
+  tm_shape(parks) + 
+  tm_polygons(fill = "FEATTYPE", fill_alpha = .5, palette = "brewer.greens") +    
+  tm_shape(rivers) + tm_lines(col = "blue")
+  
+local.map
+```
+
+
+```{r frankenmap}
+raster = tm_shape(myras, bbox = oh_region) +
+  tm_raster(col.scale = tm_scale_continuous(values = "YlGn"),
+            col.legend = tm_legend(legend.outside = T)) +
+  tm_compass(position = c("right", "top"))
+raster
+
+frankenmap <- raster + local.map + tm_title("Parks and Demographics of Portage and Summit Counties")
+frankenmap
+
+#inset ohio map
+vp_inset <- viewport(x = 0.25, y = 0.25, width = 0.3, height = 0.3, just = c("left", "bottom"))
+pushViewport(vp_inset)
+grid.draw(inset_grob)
+popViewport()
+
+```
+
+
+
+
+```{r}
+library(grid)
+norm_dim = function(obj){
+    bbox = st_bbox(obj)
+    width = bbox[["xmax"]] - bbox[["xmin"]]
+    height = bbox[["ymax"]] - bbox[["ymin"]]
+    w = width / max(width, height)
+    h = height / max(width, height)
+    return(unit(c(w, h), "snpc"))
+}
+
+main_dim = norm_dim(oh_region)
+ins_dim = norm_dim(local)
+
+main_vp = viewport(width = main_dim[1], height = main_dim[2])
+```
+
+```{r}
+ins_vp <- viewport(width = ins_dim[1] * 0.6, 
+                  height = ins_dim[2] * 0.6,
+                  x = unit(0.25, "npc"), 
+                  y = unit(0, "npc"),
+                  just = c("left", "bottom"))
+
+grid.newpage()
+print(frankenmap, vp = main_vp)
+pushViewport(main_vp)
+print(oh_map, vp = ins_vp)
+```
+
